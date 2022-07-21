@@ -1757,13 +1757,48 @@ class PluginOrderOrder extends CommonDBTM {
                $town = $town.", ";
             }
             $order_date = Html::convDate($this->fields["order_date"]);
-            $username   = getUserName(Session::getLoginUserID());
+            
+            $user       = new User();
+            if($user->getFromDB(Session::getLoginUserID())) {
+               $username   = $user->fields["realname"] . ", " . $user->fields["firstname"];
+               $user_phone = $user->fields["phone"];
+               $email      = UserEmail::getDefaultForUser(Session::getLoginUserID());
+            }
 
+            $order_name = $this->fields["name"];
+
+            $budget_id = $this->fields["budgets_id"];
+            $budget = new Budget();
+            $budgettypes_name = "";
+            if($budget->getFromDB($budget_id)) {
+               $budgettypes_id = $budget->fields["budgettypes_id"];
+               $budgettypes = new BudgetType();
+               if($budgettypes->getFromDB($budgettypes_id)) {
+                  $budgettypes_name = $budgettypes->fields["name"];
+               } else {
+                  $budgettypes_name = "no type";
+               }
+            }
+
+            $kost_stelle = '';
+            $it = $DB->request(["SELECT" => "fieldvaluefield", 
+                                 "FROM"  => "glpi_plugin_fields_entitymycustomfields",
+                                 "WHERE" => ["items_id" => $this->fields["entities_id"]]]);
+            foreach($it as $data) {
+               $kost_stelle = $data['fieldvaluefield'];
+               break;
+            }
+
+            $values['kost_stelle']      = $kost_stelle;
             $values['title_date_order'] = $town.__("The", "order")." ";
+            $values['order_name']       = $order_name;
             $values['date_order']       = $order_date;
             $values['title_sender']     = __("Issuer order", "order");
             $values['sender']           = $username;
+            $values['sender_email']     = $email;
+            $values['sender_phone']     = $user_phone;
             $values['title_budget']     = __("Budget");
+            $values['budgettypes_name'] = $budgettypes_name;
 
             $budget = new Budget();
             if ($budget->getFromDB($this->fields["budgets_id"])) {
@@ -1802,7 +1837,7 @@ class PluginOrderOrder extends CommonDBTM {
 
                $tax = new PluginOrderOrderTax();
                $tax->getFromDB($data["plugin_order_ordertaxes_id"]);
-
+               
                $listeArticles[] = [
                   'quantity'         => $quantity,
                   'ref'              => $data["name"],
@@ -1810,6 +1845,7 @@ class PluginOrderOrder extends CommonDBTM {
                   'refnumber'        => $PluginOrderReference_Supplier->getReferenceCodeByReferenceAndSupplier(
                                           $data["id"],
                                           $this->fields["suppliers_id"]),
+                  'typarticle'       => $data["itemtype"],
                   'price_taxfree'    => $data["price_taxfree"],
                   'discount'         => $data["discount"], false, 0,
                   'price_discounted' => $data["price_discounted"] * $quantity,
@@ -1827,14 +1863,16 @@ class PluginOrderOrder extends CommonDBTM {
 
                $tax = new PluginOrderOrderTax();
                $tax->getFromDB($data["plugin_order_ordertaxes_id"]);
-
+               var_dump($data["itemtype"]);
+               die();
                $listeArticles[] = [
                   'quantity'         => $quantity,
                   'ref'              => $data["name"],
                   'taxe'             => $tax->getRate(),
                   'refnumber'        => $PluginOrderReference_Supplier->getReferenceCodeByReferenceAndSupplier(
-                     $data["id"],
-                     $this->fields["suppliers_id"]),
+                                          $data["id"],
+                                          $this->fields["suppliers_id"]),
+                  'typarticle'       => $data["itemtype"],
                   'price_taxfree'    => $data["price_taxfree"],
                   'discount'         => $data["discount"], false, 0,
                   'price_discounted' => $data["price_discounted"] * $quantity,
@@ -1846,18 +1884,12 @@ class PluginOrderOrder extends CommonDBTM {
                $articleValues = [];
                $articleValues['nbA'] = $element['quantity'];
                $articleValues['titleArticle'] = $element['ref'];
+               $articleValues['typArticle'] = $element['typarticle'];
                $articleValues['refArticle'] = $element['refnumber'];
-               $articleValues['TVAArticle'] = $element['taxe'];
                $articleValues['HTPriceArticle'] = Html::formatNumber($element['price_taxfree']);
-               if ($element['discount'] != 0) {
-                  $articleValues['discount'] = Html::formatNumber($element['discount'])." %";
-               } else {
-                  $articleValues['discount'] = "";
-               }
                $articleValues['HTPriceTotalArticle'] = Html::formatNumber($element['price_discounted']);
 
                $total_TTC_Article = $element['price_discounted'] * (1 + ($element['taxe'] / 100));
-               $articleValues['ATIPriceTotalArticle'] = Html::formatNumber($total_TTC_Article);
 
                // Set variables in odt segment
                foreach ($articleValues as $field => $val) {
@@ -2753,3 +2785,4 @@ class PluginOrderOrder extends CommonDBTM {
       return "fas fa-shopping-cart";
    }
 }
+
