@@ -1863,8 +1863,7 @@ class PluginOrderOrder extends CommonDBTM {
 
                $tax = new PluginOrderOrderTax();
                $tax->getFromDB($data["plugin_order_ordertaxes_id"]);
-               var_dump($data["itemtype"]);
-               die();
+
                $listeArticles[] = [
                   'quantity'         => $quantity,
                   'ref'              => $data["name"],
