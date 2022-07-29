@@ -1781,11 +1781,11 @@ class PluginOrderOrder extends CommonDBTM {
             }
 
             $kost_stelle = '';
-            $it = $DB->request(["SELECT" => "fieldvaluefield", 
-                                 "FROM"  => "glpi_plugin_fields_entitymycustomfields",
+            $it = $DB->request(["SELECT" => "kstfield",
+                                 "FROM"  => "glpi_plugin_fields_entityksts",
                                  "WHERE" => ["items_id" => $this->fields["entities_id"]]]);
             foreach($it as $data) {
-               $kost_stelle = $data['fieldvaluefield'];
+               $kost_stelle = $data['kstfield'];
                break;
             }
 
@@ -1863,7 +1863,6 @@ class PluginOrderOrder extends CommonDBTM {
 
                $tax = new PluginOrderOrderTax();
                $tax->getFromDB($data["plugin_order_ordertaxes_id"]);
-
                $listeArticles[] = [
                   'quantity'         => $quantity,
                   'ref'              => $data["name"],
@@ -2784,4 +2783,3 @@ class PluginOrderOrder extends CommonDBTM {
       return "fas fa-shopping-cart";
    }
 }
-
