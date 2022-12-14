@@ -22,7 +22,7 @@
  * You should have received a copy of the GNU General Public License
  * along with Order. If not, see <http://www.gnu.org/licenses/>.
  * -------------------------------------------------------------------------
- * @copyright Copyright (C) 2009-2022 by Order plugin team.
+ * @copyright Copyright (C) 2009-2022 by Order plugin team, 2022 ima GmbH https://imagmbh.de/
  * @license   GPLv3 https://www.gnu.org/licenses/gpl-3.0.html
  * @link      https://github.com/pluginsGLPI/order
  * -------------------------------------------------------------------------
@@ -1977,6 +1977,165 @@ class PluginOrderOrder extends CommonDBTM {
    }
 
 
+   /**
+    * Get the total value already spent on the budget.
+    * 
+    * @todo This code is taken from base class Budget::showValuesByEntity(). Should the core class be extended to be able to return a total spent on the budget?
+    */
+   private static function getTotalSpentOnBudget($budgets_id) {
+       global $DB;
+     
+       $types_iterator = Infocom::getTypes(
+           [
+               'budgets_id' => $budgets_id
+           ] + getEntitiesRestrictCriteria('glpi_infocoms', 'entities_id')
+       );
+     
+       $totalSpentOnBudget = 0;
+     
+       $itemtypes          = [];
+     
+       foreach ($types_iterator as $types) {
+           $itemtypes[] = $types['itemtype'];
+       }
+     
+       $itemtypes[] = 'Contract';
+       $itemtypes[] = 'Ticket';
+       $itemtypes[] = 'Problem';
+       $itemtypes[] = 'Project';
+       $itemtypes[] = 'Change';
+     
+       foreach ($itemtypes as $itemtype) {
+           if (!($item = getItemForItemtype($itemtype))) {
+               continue;
+           }
+     
+           $table = getTableForItemType($itemtype);
+           switch ($itemtype) {
+               case 'Contract':
+                   $criteria = [
+                       'SELECT'       => [
+                           $table . '.entities_id',
+                           'SUM' => 'glpi_contractcosts.cost AS sumvalue'
+                       ],
+                       'FROM'         => 'glpi_contractcosts',
+                       'INNER JOIN'   => [
+                           $table => [
+                               'ON' => [
+                                   $table               => 'id',
+                                   'glpi_contractcosts' => 'contracts_id'
+                               ]
+                           ]
+                       ],
+                       'WHERE'        => [
+                           'glpi_contractcosts.budgets_id'     => $budgets_id
+                       ] + getEntitiesRestrictCriteria($table, 'entities_id'),
+                       'GROUPBY'      => [
+                           $table . '.entities_id'
+                       ]
+                   ];
+                   break;
+     
+               case 'Project':
+                   $costtable   = getTableForItemType($item->getType() . 'Cost');
+                   $criteria = [
+                       'SELECT'       => [
+                           $table . '.entities_id',
+                           'SUM' => 'glpi_projectcosts.cost AS sumvalue'
+                       ],
+                       'FROM'         => 'glpi_projectcosts',
+                       'INNER JOIN'   => [
+                           $table => [
+                               'ON' => [
+                                   $table               => 'id',
+                                   'glpi_projectcosts'  => 'projects_id'
+                               ]
+                           ]
+                       ],
+                       'WHERE'        => [
+                           'glpi_projectcosts.budgets_id'  => $budgets_id
+                       ] + getEntitiesRestrictCriteria($table, 'entities_id'),
+                       'GROUPBY'      => [
+                           $item->getTable() . '.entities_id'
+                       ]
+                   ];
+                   break;
+     
+               case 'Ticket':
+               case 'Problem':
+               case 'Change':
+                   $costtable   = getTableForItemType($item->getType() . 'Cost');
+                   $sum = new QueryExpression(
+                       "SUM(" . $DB->quoteName("$costtable.actiontime") . " * " . $DB->quoteName("$costtable.cost_time") . "/" . HOUR_TIMESTAMP . "
+                                      + " . $DB->quoteName("$costtable.cost_fixed") . "
+                                      + " . $DB->quoteName("$costtable.cost_material") . ") AS " . $DB->quoteName('sumvalue')
+                   );
+                   $criteria = [
+                       'SELECT'       => [
+                           $item->getTable() . '.entities_id',
+                           $sum
+                       ],
+                       'FROM'         => $costtable,
+                       'INNER JOIN'   => [
+                           $table => [
+                               'ON' => [
+                                   $table      => 'id',
+                                   $costtable  => $item->getForeignKeyField()
+                               ]
+                           ]
+                       ],
+                       'WHERE'        => [
+                           $costtable . '.budgets_id' => $budgets_id
+                       ] + getEntitiesRestrictCriteria($table, 'entities_id'),
+                       'GROUPBY'      => [
+                           $item->getTable() . '.entities_id'
+                       ]
+                   ];
+                   break;
+     
+               default:
+                   $criteria = [
+                       'SELECT'       => [
+                           $table . '.entities_id',
+                           'SUM' => 'glpi_infocoms.value AS sumvalue',
+                       ],
+                       'FROM'         => $table,
+                       'INNER JOIN'   => [
+                           'glpi_infocoms' => [
+                               'ON' => [
+                                   $table            => 'id',
+                                   'glpi_infocoms'   => 'items_id'
+                               ]
+                           ]
+                       ],
+                       'WHERE'        => [
+                           'glpi_infocoms.itemtype'            => $itemtype,
+                           'glpi_infocoms.budgets_id'          => $budgets_id
+                       ] + getEntitiesRestrictCriteria($table, 'entities_id'),
+                       'GROUPBY'      => [
+                           $table . '.entities_id'
+                       ]
+                   ];
+                   if ($item->maybeTemplate()) {
+                       $criteria['WHERE'][$table . '.is_template'] = 0;
+                   }
+                   break;
+           }
+     
+           $iterator = $DB->request($criteria);
+           $nb = count($iterator);
+           if ($nb) {
+               //Store, for each entity, the budget spent
+               foreach ($iterator as $values) {
+                   $totalSpentOnBudget += $values['sumvalue'];
+               }
+           }
+       }
+       
+       return $totalSpentOnBudget;
+   }
+   
+   
    public static function showForBudget($budgets_id) {
       global $DB;
 
@@ -1988,6 +2147,11 @@ class PluginOrderOrder extends CommonDBTM {
                 ORDER BY `entities_id`, `name` ";
       $result = $DB->query($query);
 
+      // get total spent on budget
+      $budget = new Budget();
+      $budget->getFromDB($budgets_id);
+      $totalSpentOnBudget = self::getTotalSpentOnBudget($budgets_id);
+              
       echo "<div class='center'>";
       if ($nb = $DB->numrows($result)) {
          $start       = (isset($_REQUEST["start"])) ? $_REQUEST["start"] : 0;
@@ -2005,7 +2169,12 @@ class PluginOrderOrder extends CommonDBTM {
          echo "<th>".__("Price ATI", "order")."</th>";
          echo "</tr>";
 
-         $total = 0;
+         $totalByOrderstate = [
+            1 => 0,
+            2 => 0,
+            3 => 0,
+            4 => 0
+         ];   
          foreach ($DB->request($query_limit) as $data) {
             $PluginOrderOrder_Item = new PluginOrderOrder_Item();
             $prices                = $PluginOrderOrder_Item->getAllPrices($data["id"]);
@@ -2020,8 +2189,21 @@ class PluginOrderOrder extends CommonDBTM {
 
             //if state is cancel do not decremente total already use
             if ($data['plugin_order_orderstates_id'] < 5) {
-               $total += $prices["priceHT"];
+                //add total used to the corresponding order states, cumulative
+                if ($data['plugin_order_orderstates_id'] >= 1) {
+                   $totalByOrderstate[1] += $prices["priceHT"];
+                } 
+                if ($data['plugin_order_orderstates_id'] >= 2) {
+                  $totalByOrderstate[2] += $prices["priceHT"];
+                } 
+                if ($data['plugin_order_orderstates_id'] >= 3) {
+                   $totalByOrderstate[3] += $prices["priceHT"];
+                } 
+                if ($data['plugin_order_orderstates_id'] >= 4) {
+                   $totalByOrderstate[4] += $prices["priceHT"];
+                } 
             }
+
             $link   = Toolbox::getItemTypeFormURL(__CLASS__);
 
             echo "<tr class='tab_bg_1' align='center'>";
@@ -2061,11 +2243,22 @@ class PluginOrderOrder extends CommonDBTM {
          echo "</table></div>";
 
          echo "<br><div class='center'>";
-         echo "<table class='tab_cadre' width='15%'>";
-         echo "<tr class='tab_bg_2'><td>".__("Budget already used").": </td>";
-         echo "<td>";
-         echo Html::formatNumber($total)."</td>";
-         echo "</tr>";
+         echo "<table class='tab_cadre' width='75%'>";
+         for ($orderstate = 1; $orderstate <= 4; $orderstate++) {
+            if ($orderstate > 1) {
+               echo "<tr class='tab_bg_2'><td>&nbsp;</td></tr>";
+            } 
+            echo "<tr class='tab_bg_2'><td class='right'>";
+            echo __("Budget already used", "order")." (".Dropdown::getDropdownName(PluginOrderOrderState::getTable(), $orderstate)."): ";
+            echo "</td><td class='numeric'>";
+            echo Html::formatNumber($totalByOrderstate[$orderstate]);
+            echo "</td></tr>";
+            echo "<tr class='tab_bg_2'><td class='right'>";
+            echo __('Total remaining on the budget')." (".Dropdown::getDropdownName(PluginOrderOrderState::getTable(), $orderstate)."): ";
+            echo "</td><td class='numeric'>";
+            echo Html::formatNumber($budget->fields['value'] - $totalSpentOnBudget - $totalByOrderstate[$orderstate]);
+            echo "</td></tr>";
+         }     
          echo "</table></div>";
       } else {
          echo "<table class='tab_cadre_fixe'>";
