@@ -16,7 +16,7 @@
     "repositories": [
         {
             "type": "vcs",
-            "url":  "https://github.com/teclib/odtphp/"
+            "url":  "https://github.com/imadevel/odtphp/"
         }
     ]
 }
